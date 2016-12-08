@@ -199,9 +199,11 @@ NSString *const MGJRouterParameterUserInfo = @"MGJRouterParameterUserInfo";
     NSMutableDictionary* subRoutes = self.routes;
     NSArray* pathComponents = [self pathComponentsFromURL:url];
     
+    BOOL found = NO;
+    
+    id recentestCompareBlock = nil;//最近的匹配值
     // borrowed from HHRouter(https://github.com/Huohua/HHRouter)
     for (NSString* pathComponent in pathComponents) {
-        BOOL found = NO;
         
         // 对 key 进行排序，这样可以把 ~ 放到最后
         NSArray *subRoutesKeys =[subRoutes.allKeys sortedArrayUsingComparator:^NSComparisonResult(NSString *obj1, NSString *obj2) {
@@ -233,6 +235,85 @@ NSString *const MGJRouterParameterUserInfo = @"MGJRouterParameterUserInfo";
                 break;
             }
         }
+        
+        if (found && subRoutes[@"_"]){
+            recentestCompareBlock = [subRoutes[@"_"] copy];
+        }
+        
+        // 如果没有找到该 pathComponent 对应的 handler，则以上一层的 handler 作为 fallback
+        if (!found && !subRoutes[@"_"]) {
+            return nil;
+        }
+    }
+    
+    // Extract Params From Query.
+    NSArray* pathInfo = [url componentsSeparatedByString:@"?"];
+    if (pathInfo.count > 1) {
+        NSString* parametersString = [pathInfo objectAtIndex:1];
+        NSArray* paramStringArr = [parametersString componentsSeparatedByString:@"&"];
+        for (NSString* paramString in paramStringArr) {
+            NSArray* paramArr = [paramString componentsSeparatedByString:@"="];
+            if (paramArr.count > 1) {
+                NSString* key = [paramArr objectAtIndex:0];
+                NSString* value = [paramArr objectAtIndex:1];
+                parameters[key] = value;
+            }
+        }
+    }
+    
+    if (recentestCompareBlock) {
+        parameters[@"block"] = recentestCompareBlock;
+    }
+    
+    return parameters;
+}
+
+
+//mgjrouter 原生的
+- (NSMutableDictionary *)extractParametersFromURLBackUp:(NSString *)url
+{
+    NSMutableDictionary* parameters = [NSMutableDictionary dictionary];
+    
+    parameters[MGJRouterParameterURL] = url;
+    
+    NSMutableDictionary* subRoutes = self.routes;
+    NSArray* pathComponents = [self pathComponentsFromURL:url];
+    
+    BOOL found = NO;
+    // borrowed from HHRouter(https://github.com/Huohua/HHRouter)
+    for (NSString* pathComponent in pathComponents) {
+        
+        // 对 key 进行排序，这样可以把 ~ 放到最后
+        NSArray *subRoutesKeys =[subRoutes.allKeys sortedArrayUsingComparator:^NSComparisonResult(NSString *obj1, NSString *obj2) {
+            return [obj1 compare:obj2];
+        }];
+        
+        for (NSString* key in subRoutesKeys) {
+            if ([key isEqualToString:pathComponent] || [key isEqualToString:MGJ_ROUTER_WILDCARD_CHARACTER]) {
+                found = YES;
+                subRoutes = subRoutes[key];
+                break;
+            } else if ([key hasPrefix:@":"]) {
+                found = YES;
+                subRoutes = subRoutes[key];
+                NSString *newKey = [key substringFromIndex:1];
+                NSString *newPathComponent = pathComponent;
+                // 再做一下特殊处理，比如 :id.html -> :id
+                if ([self.class checkIfContainsSpecialCharacter:key]) {
+                    NSCharacterSet *specialCharacterSet = [NSCharacterSet characterSetWithCharactersInString:specialCharacters];
+                    NSRange range = [key rangeOfCharacterFromSet:specialCharacterSet];
+                    if (range.location != NSNotFound) {
+                        // 把 pathComponent 后面的部分也去掉
+                        newKey = [newKey substringToIndex:range.location - 1];
+                        NSString *suffixToStrip = [key substringFromIndex:range.location];
+                        newPathComponent = [newPathComponent stringByReplacingOccurrencesOfString:suffixToStrip withString:@""];
+                    }
+                }
+                parameters[newKey] = newPathComponent;
+                break;
+            }
+        }
+        
         // 如果没有找到该 pathComponent 对应的 handler，则以上一层的 handler 作为 fallback
         if (!found && !subRoutes[@"_"]) {
             return nil;
